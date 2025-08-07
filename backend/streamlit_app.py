@@ -1,7 +1,10 @@
+# backend/streamlit_app.py
 from __future__ import annotations
-import sys
+
 import os
+import sys
 from typing import List
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -12,7 +15,7 @@ from backend.llm_utils import get_llm
 load_dotenv()
 
 st.set_page_config(page_title="Firecrawl LlamaIndex App", page_icon="🦙")
-st.title("🌐 Firecrawl + LlamaIndex + Gemma Demo")
+st.title("🌐 Firecrawl + LlamaIndex + Gemma 🌐")
 
 settings = get_settings()
 
@@ -21,24 +24,42 @@ def get_doc_count() -> int:
 
 with st.sidebar:
     st.header("Configuration")
-    st.write("MongoDB URI: ", settings["mongo_uri"])
-    st.write("Database: ", settings["mongo_db"])
-    st.write("Collection: ", settings["mongo_collection"])
-    st.write("Documents in DB: ", get_doc_count())
+    st.write("MongoDB URI:", settings["mongo_uri"])
+    st.write("Database:", settings["mongo_db"])
+    st.write("Collection:", settings["mongo_collection"])
+    st.write("Embedding model:", settings["embedding_model"])
+    st.write("LLM model:", os.getenv("GEMMA_MODEL", "gemma:2b"))
+    st.write("Documents in DB:", get_doc_count())
 
 st.subheader("Step 1: Scrape or crawl URLs")
-url_input = st.text_area("Enter one or more URLs", placeholder="https://example.com")
+url_input = st.text_area(
+    "Enter one or more URLs (separated by new lines)",
+    placeholder="https://example.com\nhttps://another.com",
+)
+
 if st.button("Scrape URLs"):
-    urls: List[str] = [u.strip() for u in url_input.splitlines() if u.strip()]
-    if urls:
-        try:
-            count = scrape_and_store(urls)
-            st.success(f"Inserted {count} documents into MongoDB")
-        except Exception as exc:
-            st.error(f"Error while scraping: {exc}")
-    else:
+    print("SCRAPE button clicked")  # shows up in your Streamlit terminal
+    urls = [u.strip() for u in url_input.splitlines() if u.strip()]
+
+    if not urls:
         st.warning("Please enter at least one URL")
-    st.rerun()
+    else:
+        # Normalize schemes so Firecrawl doesn’t ignore bare domains
+        urls = [u if u.startswith(("http://", "https://")) else f"https://{u}" for u in urls]
+
+        with st.spinner("Scraping with Firecrawl..."):
+            try:
+                inserted = scrape_and_store(urls)
+            except Exception as exc:
+                st.error(f"Error while scraping: {exc}")
+            else:
+                if inserted > 0:
+                    st.success(f"Inserted {inserted} documents into MongoDB")
+                else:
+                    st.warning("No content was extracted from the provided URLs.")
+
+        # Show the UPDATED count immediately (no rerun required)
+        st.info(f"Documents in DB now: {get_doc_count()}")
 
 st.markdown("---")
 
@@ -59,15 +80,12 @@ if st.button("Ask"):
         st.warning("Please enter a question")
     else:
         try:
-            from llama_index.core import VectorStoreIndex
-            try:
-                index = VectorStoreIndex.load_from_disk(settings["index_path"])
-            except Exception:
-                index = build_index()
+            from backend.data_pipeline import load_or_build_index
+            idx = load_or_build_index(settings)
             llm = get_llm()
-            query_engine = index.as_query_engine(llm=llm, streaming=True)
+            qe = idx.as_query_engine(llm=llm)
             with st.spinner("Generating answer..."):
-                response = query_engine.query(query)
-            st.write(response)
+                response = qe.query(query)
+            st.write(str(response))
         except Exception as exc:
             st.error(f"Error: {exc}")

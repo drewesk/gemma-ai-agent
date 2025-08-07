@@ -1,3 +1,4 @@
+# backend/data_pipeline.py
 from __future__ import annotations
 
 import os
@@ -29,7 +30,7 @@ def _get_settings() -> Dict[str, Any]:
         "mongo_db": os.getenv("MONGO_DB", "firecrawl_db"),
         "mongo_collection": os.getenv("MONGO_COLLECTION", "documents"),
         "firecrawl_api_key": os.getenv("FIRECRAWL_API_KEY", ""),
-        "firecrawl_mode": os.getenv("FIRECRAWL_MODE", "scrape"),  # or "crawl"
+        "firecrawl_mode": (os.getenv("FIRECRAWL_MODE", "scrape") or "scrape").lower(),  # "scrape" or "crawl"
     }
 
 
@@ -42,12 +43,12 @@ def _get_mongo_collection():
 
 
 def get_mongo_collection():
-    """Public wrapper for external imports."""
+    """Public wrapper for external imports (Streamlit/API)."""
     return _get_mongo_collection()
 
 
 # -----------------------
-# URL helpers
+# URL / text helpers
 # -----------------------
 def _iter_urls(urls_or_csv: Iterable[str]) -> Iterable[str]:
     """Yield individual URLs from CSV strings or lists."""
@@ -64,9 +65,6 @@ def _iter_urls(urls_or_csv: Iterable[str]) -> Iterable[str]:
             yield u
 
 
-# -----------------------
-# Scrape & Store
-# -----------------------
 def _node_text(node: Any) -> str:
     """Robustly extract text from Firecrawl nodes or documents."""
     text = getattr(node, "text", None)
@@ -80,11 +78,52 @@ def _node_text(node: Any) -> str:
     return (text or "").strip()
 
 
+def _local_html_extract(url: str) -> str:
+    """Last-ditch extractor: plain HTTP + BeautifulSoup, for SPA/minimal HTML."""
+    try:
+        import requests
+        from bs4 import BeautifulSoup  # pip install beautifulsoup4
+    except Exception:
+        return ""
+
+    try:
+        r = requests.get(
+            url,
+            timeout=25,
+            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"},
+        )
+        if r.status_code != 200 or not r.text:
+            return ""
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Drop obvious junk
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+
+        # Prefer main/article if present; otherwise use body
+        root = soup.select_one("main, article") or soup.body or soup
+        parts: List[str] = []
+        for sel in ["h1", "h2", "h3", "h4", "p", "li"]:
+            for node in root.select(sel):
+                text = (node.get_text(separator=" ", strip=True) or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
+    except Exception:
+        return ""
+
+
+# -----------------------
+# Scrape & Store
+# -----------------------
 def scrape_and_store(urls: Iterable[str]) -> int:
     """
-    Use Firecrawl to extract content from given URLs and store into Mongo.
-    Each inserted doc has fields: {"content": <markdown/text>, "url": <url>}
-    Returns number of docs inserted.
+    Use Firecrawl to extract content and store into Mongo.
+
+    Order:
+      1) LlamaIndex FireCrawlWebReader (mode-aware: url= for scrape, urls=[...] for crawl)
+      2) Firecrawl SDK fallback (markdown/text)
+      3) Local HTML fallback (requests + BeautifulSoup)
     """
     if not HAVE_FIRECRAWL:
         raise RuntimeError(
@@ -95,7 +134,6 @@ def scrape_and_store(urls: Iterable[str]) -> int:
     api_key = s["firecrawl_api_key"]
     mode = s["firecrawl_mode"]
 
-    # Ask FireCrawlWebReader for markdown and plain text
     reader = FireCrawlWebReader(
         api_key=api_key,
         mode=mode,
@@ -104,39 +142,54 @@ def scrape_and_store(urls: Iterable[str]) -> int:
     col = _get_mongo_collection()
 
     inserted = 0
-    for url in _iter_urls(urls):
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+    for raw in _iter_urls(urls):
+        url = raw if raw.startswith(("http://", "https://")) else f"https://{raw}"
+        print(f"[scrape] URL: {url} | mode={mode}")
 
+        # 1) Reader
         try:
-            # IMPORTANT: use the plural form 'urls=[...]' here
-            docs = reader.load_data(urls=[url]) or []
-        except Exception:
+            if mode == "crawl":
+                docs = reader.load_data(urls=[url]) or []
+            else:  # "scrape"
+                docs = reader.load_data(url=url) or []
+            print(f"[scrape] reader docs: {len(docs)}")
+        except Exception as e:
+            print("[scrape] reader error:", repr(e))
             docs = []
 
         payloads: List[Dict[str, Any]] = []
-
-        # primary path: reader returned Documents
-        for d in docs:
+        for i, d in enumerate(docs):
             content = _node_text(d)
+            print(f"[scrape] node {i} content len:", len(content))
             if content:
                 payloads.append({"content": content, "url": url})
 
-        # optional fallback using official client if reader gave nothing
+        # 2) SDK fallback
         if not payloads:
             try:
                 from firecrawl import FirecrawlApp
                 app = FirecrawlApp(api_key=api_key)
                 res = app.scrape_url(url, params={"formats": ["markdown", "text"]}) or {}
                 md = (res.get("markdown") or res.get("text") or "").strip()
+                print("[scrape] SDK markdown len:", len(md))
                 if md:
                     payloads.append({"content": md, "url": url})
-            except Exception:
-                pass
+            except Exception as e:
+                print("[scrape] SDK error:", repr(e))
+
+        # 3) Local HTML fallback
+        if not payloads:
+            local_text = _local_html_extract(url)
+            print("[scrape] local extracted len:", len(local_text))
+            if local_text:
+                payloads.append({"content": local_text, "url": url})
 
         if payloads:
-            result = col.insert_many(payloads)
-            inserted += len(result.inserted_ids)
+            res = col.insert_many(payloads)
+            print(f"[scrape] inserted {len(res.inserted_ids)} docs")
+            inserted += len(res.inserted_ids)
+        else:
+            print("[scrape] nothing extracted")
 
     return inserted
 
@@ -169,4 +222,5 @@ def load_or_build_index(settings: Dict[str, Any] | None = None) -> VectorStoreIn
 def build_index(save: bool = False, path: str | None = None) -> VectorStoreIndex:
     """Streamlit expects this — just wraps load_or_build_index."""
     idx = load_or_build_index(None)
+    # If you want persistence later, wire StorageContext().persist(path) here.
     return idx
