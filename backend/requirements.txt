@@ -1,0 +1,11 @@
+firecrawl-py==0.0.20
+llama-index
+llama-index-readers-web
+pymongo
+fastapi
+uvicorn
+streamlit
+python-dotenv
+transformers
+torch
+sentence-transformers
