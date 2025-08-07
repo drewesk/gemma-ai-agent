@@ -67,38 +67,76 @@ def _iter_urls(urls_or_csv: Iterable[str]) -> Iterable[str]:
 # -----------------------
 # Scrape & Store
 # -----------------------
+def _node_text(node: Any) -> str:
+    """Robustly extract text from Firecrawl nodes or documents."""
+    text = getattr(node, "text", None)
+    if not text:
+        text = getattr(node, "page_content", None)
+    if not text and hasattr(node, "get_content"):
+        try:
+            text = node.get_content(metadata_mode=None)
+        except Exception:
+            text = None
+    return (text or "").strip()
+
+
 def scrape_and_store(urls: Iterable[str]) -> int:
     """
-    Use FireCrawl to extract content from given URLs and store into MongoDB.
+    Use Firecrawl to extract content from given URLs and store into Mongo.
+    Each inserted doc has fields: {"content": <markdown/text>, "url": <url>}
     Returns number of docs inserted.
     """
     if not HAVE_FIRECRAWL:
         raise RuntimeError(
-            "FireCrawlWebReader not available. Install it via: "
-            "pip install llama-index-readers-web firecrawl-py"
+            "FireCrawlWebReader not available. Install: pip install llama-index-readers-web firecrawl-py"
         )
 
     s = _get_settings()
     api_key = s["firecrawl_api_key"]
-    if not api_key:
-        raise RuntimeError("Missing FIRECRAWL_API_KEY in environment")
-
     mode = s["firecrawl_mode"]
-    reader = FireCrawlWebReader(api_key=api_key, mode=mode)
+
+    # Ask FireCrawlWebReader for markdown and plain text
+    reader = FireCrawlWebReader(
+        api_key=api_key,
+        mode=mode,
+        params={"formats": ["markdown", "text"]},
+    )
     col = _get_mongo_collection()
 
     inserted = 0
     for url in _iter_urls(urls):
-        docs = reader.load_data(url=url)  # List[Document]
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+
+        try:
+            # IMPORTANT: use the plural form 'urls=[...]' here
+            docs = reader.load_data(urls=[url]) or []
+        except Exception:
+            docs = []
+
         payloads: List[Dict[str, Any]] = []
+
+        # primary path: reader returned Documents
         for d in docs:
-            text = (getattr(d, "text", "") or "").strip()
-            if not text:
-                continue
-            payloads.append({"content": text, "url": url})
+            content = _node_text(d)
+            if content:
+                payloads.append({"content": content, "url": url})
+
+        # optional fallback using official client if reader gave nothing
+        if not payloads:
+            try:
+                from firecrawl import FirecrawlApp
+                app = FirecrawlApp(api_key=api_key)
+                res = app.scrape_url(url, params={"formats": ["markdown", "text"]}) or {}
+                md = (res.get("markdown") or res.get("text") or "").strip()
+                if md:
+                    payloads.append({"content": md, "url": url})
+            except Exception:
+                pass
+
         if payloads:
-            res = col.insert_many(payloads)
-            inserted += len(res.inserted_ids)
+            result = col.insert_many(payloads)
+            inserted += len(result.inserted_ids)
 
     return inserted
 
@@ -111,19 +149,18 @@ def load_or_build_index(settings: Dict[str, Any] | None = None) -> VectorStoreIn
     col = _get_mongo_collection()
     docs: List[Document] = []
 
-    for d in col.find({}, {"content": 1, "url": 1}):
-        content = (d.get("content") or "").strip()
+    for rec in col.find({}, {"content": 1, "url": 1}):
+        content = (rec.get("content") or "").strip()
         if not content:
             continue
         metadata: Dict[str, Any] = {}
-        if d.get("url"):
-            metadata["source"] = d["url"]
+        if rec.get("url"):
+            metadata["source"] = rec["url"]
         docs.append(Document(text=content, metadata=metadata))
 
-    embed_model = get_embed_model()  # always use local model
+    embed_model = get_embed_model()
 
     if not docs:
-        # Empty index but still initialize with embed model
         return VectorStoreIndex.from_documents([], embed_model=embed_model)
 
     return VectorStoreIndex.from_documents(docs, embed_model=embed_model)
@@ -132,7 +169,4 @@ def load_or_build_index(settings: Dict[str, Any] | None = None) -> VectorStoreIn
 def build_index(save: bool = False, path: str | None = None) -> VectorStoreIndex:
     """Streamlit expects this — just wraps load_or_build_index."""
     idx = load_or_build_index(None)
-    # Add persistence here if needed:
-    # if save and path:
-    #     StorageContext.from_defaults().persist(path)
     return idx

@@ -9,7 +9,7 @@ _DEFAULT_EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-M
 def get_llm() -> Ollama:
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     model = os.getenv("GEMMA_MODEL", "gemma:2b")
-    return Ollama(model=model, base_url=base_url, request_timeout=0)
+    return Ollama(model=model, base_url=base_url, request_timeout=9999999)
 
 def get_embed_model(name: Optional[str] = None):
     model_name = name or _DEFAULT_EMBED_MODEL
