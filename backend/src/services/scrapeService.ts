@@ -1,5 +1,7 @@
-import { runLlm } from './llmService';
-import { FIRECRAWL_API_KEY, FIRECRAWL_API_URL } from '../config';
+import { runLlm } from "./llmService";
+import { FIRECRAWL_API_KEY, FIRECRAWL_API_URL } from "../config";
+
+console.log("SCRAPE SERVICE sees key:", FIRECRAWL_API_KEY);
 
 /**
  * Fetch the HTML for a given URL using the native fetch API. This
@@ -7,29 +9,43 @@ import { FIRECRAWL_API_KEY, FIRECRAWL_API_URL } from '../config';
  *
  * @param url The URL to fetch
  */
+
 export async function fetchHtml(url: string): Promise<string> {
-  // If a Firecrawl API key is provided, call the Firecrawl scrape API
   if (FIRECRAWL_API_KEY) {
-    const reqBody = { url };
-    const response = await globalThis.fetch(FIRECRAWL_API_URL, {
-      method: 'POST',
+    const apiUrl = FIRECRAWL_API_URL || "https://api.firecrawl.dev/v1/scrape";
+    const reqBody = {
+      url,
+      formats: ["html", "markdown"], // match your working curl exactly
+      onlyMainContent: true,
+    };
+
+    const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${FIRECRAWL_API_KEY}`
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
       },
-      body: JSON.stringify(reqBody)
+      body: JSON.stringify(reqBody),
     });
+
+    console.log("Sending to Firecrawl:", JSON.stringify(reqBody, null, 2));
+
     if (!response.ok) {
-      throw new Error(`Firecrawl request failed: ${response.statusText}`);
+      throw new Error(
+        `Firecrawl request failed: ${response.status} ${response.statusText}`
+      );
     }
+
     const data: any = await response.json();
-    // The Firecrawl response can include html, markdown, rawHtml or content
-    return data.html || data.markdown || data.rawHtml || data.content || '';
+    return data.markdown || data.html || data.rawHtml || data.content || "";
   }
-  // Otherwise fall back to native fetch of the URL
+
+  // Fallback: direct fetch
   const response = await globalThis.fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch URL: ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch URL: ${response.status} ${response.statusText}`
+    );
   }
   return response.text();
 }
@@ -42,7 +58,10 @@ export async function fetchHtml(url: string): Promise<string> {
  * @param url The URL to fetch
  * @param summarise Whether to summarise using the LLM
  */
-export async function scrape(url: string, summarise: boolean = false): Promise<{ html?: string; summary?: string }> {
+export async function scrape(
+  url: string,
+  summarise: boolean = false
+): Promise<{ html?: string; summary?: string }> {
   const html = await fetchHtml(url);
   if (summarise) {
     const summary = await runLlm(html);

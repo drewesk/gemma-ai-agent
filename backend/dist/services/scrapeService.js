@@ -13,6 +13,7 @@ exports.fetchHtml = fetchHtml;
 exports.scrape = scrape;
 const llmService_1 = require("./llmService");
 const config_1 = require("../config");
+console.log("SCRAPE SERVICE sees key:", config_1.FIRECRAWL_API_KEY);
 /**
  * Fetch the HTML for a given URL using the native fetch API. This
  * service function allows for easier testing and reuse.
@@ -21,28 +22,32 @@ const config_1 = require("../config");
  */
 function fetchHtml(url) {
     return __awaiter(this, void 0, void 0, function* () {
-        // If a Firecrawl API key is provided, call the Firecrawl scrape API
         if (config_1.FIRECRAWL_API_KEY) {
-            const reqBody = { url };
-            const response = yield globalThis.fetch(config_1.FIRECRAWL_API_URL, {
-                method: 'POST',
+            const apiUrl = config_1.FIRECRAWL_API_URL || "https://api.firecrawl.dev/v1/scrape";
+            const reqBody = {
+                url,
+                formats: ["html", "markdown"], // match your working curl exactly
+                onlyMainContent: true,
+            };
+            const response = yield fetch("https://api.firecrawl.dev/v1/scrape", {
+                method: "POST",
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${config_1.FIRECRAWL_API_KEY}`
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${config_1.FIRECRAWL_API_KEY}`,
                 },
-                body: JSON.stringify(reqBody)
+                body: JSON.stringify(reqBody),
             });
+            console.log("Sending to Firecrawl:", JSON.stringify(reqBody, null, 2));
             if (!response.ok) {
-                throw new Error(`Firecrawl request failed: ${response.statusText}`);
+                throw new Error(`Firecrawl request failed: ${response.status} ${response.statusText}`);
             }
             const data = yield response.json();
-            // The Firecrawl response can include html, markdown, rawHtml or content
-            return data.html || data.markdown || data.rawHtml || data.content || '';
+            return data.markdown || data.html || data.rawHtml || data.content || "";
         }
-        // Otherwise fall back to native fetch of the URL
+        // Fallback: direct fetch
         const response = yield globalThis.fetch(url);
         if (!response.ok) {
-            throw new Error(`Failed to fetch URL: ${response.statusText}`);
+            throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
         }
         return response.text();
     });
