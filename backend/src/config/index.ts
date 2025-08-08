@@ -3,8 +3,6 @@ import path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
-console.log("Firecrawl API Key:", process.env.FIRECRAWL_API_KEY); // debug check
-
 /**
  * Centralised configuration for the backend. Environment variables can be
  * used to override these values at runtime without changing code.

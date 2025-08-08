@@ -7,7 +7,6 @@ import { PORT } from "./config";
 // Load environment variables from .env if present
 dotenv.config();
 
-console.log(PORT);
 // Create the Express application
 const app = express();
 

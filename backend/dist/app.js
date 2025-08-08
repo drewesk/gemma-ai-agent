@@ -10,7 +10,6 @@ const routes_1 = __importDefault(require("./routes"));
 const config_1 = require("./config");
 // Load environment variables from .env if present
 dotenv_1.default.config();
-console.log(config_1.PORT);
 // Create the Express application
 const app = (0, express_1.default)();
 // Middleware

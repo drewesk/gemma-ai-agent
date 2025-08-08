@@ -13,7 +13,6 @@ exports.fetchHtml = fetchHtml;
 exports.scrape = scrape;
 const llmService_1 = require("./llmService");
 const config_1 = require("../config");
-console.log("SCRAPE SERVICE sees key:", config_1.FIRECRAWL_API_KEY);
 /**
  * Fetch the HTML for a given URL using the native fetch API. This
  * service function allows for easier testing and reuse.
@@ -22,6 +21,7 @@ console.log("SCRAPE SERVICE sees key:", config_1.FIRECRAWL_API_KEY);
  */
 function fetchHtml(url) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         if (config_1.FIRECRAWL_API_KEY) {
             const apiUrl = config_1.FIRECRAWL_API_URL || "https://api.firecrawl.dev/v1/scrape";
             const reqBody = {
@@ -29,20 +29,25 @@ function fetchHtml(url) {
                 formats: ["html", "markdown"], // match your working curl exactly
                 onlyMainContent: true,
             };
-            const response = yield fetch("https://api.firecrawl.dev/v1/scrape", {
+            const response = yield fetch(apiUrl, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${config_1.FIRECRAWL_API_KEY}`,
+                    Accept: "application/json",
+                    Authorization: `Bearer ${config_1.FIRECRAWL_API_KEY.trim()}`,
                 },
                 body: JSON.stringify(reqBody),
             });
-            console.log("Sending to Firecrawl:", JSON.stringify(reqBody, null, 2));
             if (!response.ok) {
                 throw new Error(`Firecrawl request failed: ${response.status} ${response.statusText}`);
             }
             const data = yield response.json();
-            return data.markdown || data.html || data.rawHtml || data.content || "";
+            console.log("Full Firecrawl response:", data);
+            return (((_a = data.data) === null || _a === void 0 ? void 0 : _a.markdown) ||
+                ((_b = data.data) === null || _b === void 0 ? void 0 : _b.html) ||
+                ((_c = data.data) === null || _c === void 0 ? void 0 : _c.rawHtml) ||
+                ((_d = data.data) === null || _d === void 0 ? void 0 : _d.content) ||
+                "");
         }
         // Fallback: direct fetch
         const response = yield globalThis.fetch(url);

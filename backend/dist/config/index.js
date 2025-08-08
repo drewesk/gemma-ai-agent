@@ -7,7 +7,6 @@ exports.FIRECRAWL_API_URL = exports.FIRECRAWL_API_KEY = exports.MONGODB_COLLECTI
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, "../../.env") });
-console.log("Firecrawl API Key:", process.env.FIRECRAWL_API_KEY); // debug check
 /**
  * Centralised configuration for the backend. Environment variables can be
  * used to override these values at runtime without changing code.

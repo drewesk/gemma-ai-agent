@@ -1,8 +1,6 @@
 import { runLlm } from "./llmService";
 import { FIRECRAWL_API_KEY, FIRECRAWL_API_URL } from "../config";
 
-console.log("SCRAPE SERVICE sees key:", FIRECRAWL_API_KEY);
-
 /**
  * Fetch the HTML for a given URL using the native fetch API. This
  * service function allows for easier testing and reuse.
@@ -19,16 +17,15 @@ export async function fetchHtml(url: string): Promise<string> {
       onlyMainContent: true,
     };
 
-    const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+        Accept: "application/json",
+        Authorization: `Bearer ${FIRECRAWL_API_KEY.trim()}`,
       },
       body: JSON.stringify(reqBody),
     });
-
-    console.log("Sending to Firecrawl:", JSON.stringify(reqBody, null, 2));
 
     if (!response.ok) {
       throw new Error(
@@ -37,7 +34,15 @@ export async function fetchHtml(url: string): Promise<string> {
     }
 
     const data: any = await response.json();
-    return data.markdown || data.html || data.rawHtml || data.content || "";
+    console.log("Full Firecrawl response:", data);
+
+    return (
+      data.data?.markdown ||
+      data.data?.html ||
+      data.data?.rawHtml ||
+      data.data?.content ||
+      ""
+    );
   }
 
   // Fallback: direct fetch
