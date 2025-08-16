@@ -1,0 +1,52 @@
+import React, { useState } from 'react';
+import { scrapeUrl, createDocument, listDocuments } from './api';
+
+function App() {
+  const [url, setUrl] = useState('');
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleScrape = async (e) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    setLoading(true);
+    try {
+      const scraped = await scrapeUrl(url, true); // get scraped summary
+      await createDocument(scraped); // save to MongoDB
+      const allDocs = await listDocuments(); // refresh list
+      setDocs(allDocs);
+    } catch (err) {
+      console.error(err);
+      alert('Error: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif' }}>
+      <h1>Firecrawl + MongoDB</h1>
+      <form onSubmit={handleScrape}>
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Enter URL to scrape"
+          style={{ width: '100%', padding: '0.5rem', marginBottom: '1rem' }}
+        />
+        <button type="submit" disabled={loading} style={{ padding: '0.5rem 1rem' }}>
+          {loading ? 'Scraping...' : 'Scrape & Save'}
+        </button>
+      </form>
+
+      <ul>
+        {docs.map((doc) => (
+          <li key={doc._id}>{doc.title || doc.url}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default App;
